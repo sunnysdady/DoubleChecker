@@ -1,116 +1,238 @@
 #!/usr/bin/env python3
-# report.py — 由合并后的 findings 生成交付报告：① 自包含 HTML ② Word(.docx)
+# report.py — 由合并后的 findings 生成交付报告，套用 VCD 校对报告模板
+#  ① Word(.docx)：横向 A4·Arial·红黑灰极简，黑底白字表头、粉底红字「类型」列、按语言分节
+#  ② 自包含 HTML：同款排版，离线可看
 # 用法： python3 report.py merged.json out_dir   （merged.json = {meta, issues, stats, audit_summary}）
-# HTML 永远生成；Word 需 python-docx，缺失则跳过并提示。
-import sys, json, html
+import sys, json, html as _h
 from datetime import date
 
-SEV = {"high": ("高优先", "#c0392b"), "warn": ("疑似 / 待确认", "#e67e22"), "low": ("低优先", "#7f8c8d")}
+# 模板配色
+RED = "DC1E1E"; DARK = "1D1D1F"; GRAY = "6E6E73"; AMBER = "B25E00"; GREEN = "1A7F37"
+HDR_BG = "1A1A1A"; BANNER_BG = "FFF7E8"; TYPE_BG = "FFF0F0"; WHITE = "FFFFFF"
+COLW = [0.43, 1.04, 3.54, 1.26, 4.17]            # 5 列宽（英寸，横向 A4）
+LANG_NAMES = [("EN", "英语"), ("ES", "西班牙语"), ("DE", "德语"),
+              ("FR", "法语"), ("IT", "意大利语"), ("JP", "日语")]
+NAME = dict(LANG_NAMES)
 
 
-def _rows(issues, sev):
-    items = [i for i in issues if i.get("severity") == sev]
-    if not items:
-        return "<p style='color:#888'>（无）</p>"
-    r = ["<table><tr><th>代号</th><th>位置</th><th>原文（逐字）</th><th>类型</th><th>建议 / 说明</th></tr>"]
-    for it in items:
-        loc = html.escape(str(it.get("lang") or "—"))
-        if it.get("line"):
-            loc += f" · L{it['line']}"
-        r.append("<tr><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td></tr>".format(
-            html.escape(it.get("code", "")), loc, html.escape(it.get("text", "")),
-            html.escape(it.get("kind", "")), html.escape(it.get("note", ""))))
-    r.append("</table>")
-    return "".join(r)
+def _sec_of(it):
+    """归属：高优先/结构性 → 结构性表；否则按语言分节。"""
+    s = it.get("section")
+    if s:
+        return s
+    if it.get("severity") == "high":
+        return "结构性"
+    lang = (it.get("lang") or "").strip()
+    if "←" in lang:
+        return lang.split("←")[0].strip()        # 目标语言版本
+    return lang if lang in NAME else "其他"
 
 
-def build_html(meta, result, out_path):
-    st = result.get("stats", {})
-    audit = result.get("audit_summary", "")
-    secs = ""
-    for sev, (label, color) in SEV.items():
-        secs += f"<h2 style='border-left:5px solid {color};padding-left:10px'>{label}</h2>" + _rows(result["issues"], sev)
-    audit_box = (f"<div class='audit'><b>AI 审计结论（独立审计员把关）</b><br>{html.escape(audit)}</div>"
-                 if audit else "")
-    doc = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>校对报告 · {html.escape(meta.get('product',''))}</title>
-<style>
-body{{font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;max-width:980px;margin:0 auto;padding:30px;color:#1a1a1a;line-height:1.6}}
-h1{{color:#c00000;font-size:26px;margin-bottom:2px}} h2{{font-size:19px;margin:26px 0 8px}}
-.sub{{color:#666;margin-bottom:14px}}
-.kv{{border-collapse:collapse;margin:10px 0}} .kv td{{border:1px solid #ddd;padding:6px 12px}} .kv td:first-child{{background:#efefef;font-weight:600}}
-.stat{{display:flex;gap:10px;margin:14px 0}} .stat div{{border:1px solid #ddd;border-radius:8px;padding:8px 16px}} .stat b{{font-size:24px;display:block}}
-table{{width:100%;border-collapse:collapse;margin:8px 0;font-size:13.5px}} th,td{{border:1px solid #ddd;padding:7px 9px;text-align:left;vertical-align:top}} th{{background:#d5e8f0}}
-code{{background:#f4f4f4;padding:1px 5px;border-radius:4px}}
-.audit{{background:#f4f0ff;border-left:5px solid #5b3a8c;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}}
-.boundary{{background:#fffaf0;border-left:4px solid #e67e22;padding:10px 14px;font-size:13px;color:#555;margin-top:24px}}
-.stamp{{display:inline-block;border:2px solid #5b3a8c;color:#5b3a8c;border-radius:6px;padding:2px 10px;font-size:12px;transform:rotate(-3deg)}}
-</style></head><body>
-<h1>校对报告 {('<span class="stamp">已审计</span>' if audit else '')}</h1>
-<div class="sub">{html.escape(meta.get('product', meta.get('filename','')))}</div>
-<table class="kv">
-<tr><td>文件 / 产品</td><td>{html.escape(meta.get('filename',''))}</td></tr>
-<tr><td>语言覆盖</td><td>{html.escape(meta.get('langs',''))}</td></tr>
-<tr><td>风格标准</td><td>Apple 技术文档风格（专业·精准·简洁·无营销腔）</td></tr>
-<tr><td>制表日期</td><td>{meta.get('date', date.today().isoformat())}</td></tr>
-</table>
-<div class="stat"><div><b>{st.get('total',0)}</b>总数</div><div style="color:#c0392b"><b>{st.get('high',0)}</b>高优先</div>
-<div style="color:#e67e22"><b>{st.get('warn',0)}</b>疑似/待确认</div><div style="color:#7f8c8d"><b>{st.get('low',0)}</b>低优先</div></div>
-{audit_box}
-{secs}
-<div class="boundary">本报告为「线索层」，不替代视觉终审。四条铁律：只校产品内容 / 禁止编造 / OCR 不纠错 / 截断不补全。
-事实真伪、纯视觉乱码、语义型交叉引用需人工 + 联网最终确认。</div>
-</body></html>"""
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(doc)
-    return out_path
+def _loc(it):
+    return it.get("loc") or (f"L{it['line']}" if it.get("line") else (it.get("lang") or "—"))
 
 
+def _group(issues):
+    structural = [i for i in issues if _sec_of(i) == "结构性"]
+    bylang = {}
+    for i in issues:
+        s = _sec_of(i)
+        if s == "结构性":
+            continue
+        bylang.setdefault(s, []).append(i)
+    return structural, bylang
+
+
+# ================================================================ Word
 def build_docx(meta, result, out_path):
     try:
         from docx import Document
         from docx.shared import Pt, RGBColor, Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH as AL
+        from docx.enum.section import WD_ORIENT
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
     except ImportError:
         return None
     FONT = "Arial"
 
+    def rgb(hexs):
+        return RGBColor(int(hexs[0:2], 16), int(hexs[2:4], 16), int(hexs[4:6], 16))
+
     def shade(cell, fill):
         tcPr = cell._tc.get_or_add_tcPr(); shd = OxmlElement('w:shd')
         shd.set(qn('w:val'), 'clear'); shd.set(qn('w:fill'), fill); tcPr.append(shd)
 
-    def setc(cell, t, bold=False, size=10):
-        cell.text = ""; r = cell.paragraphs[0].add_run(t or "")
-        r.font.name = FONT; r.font.size = Pt(size); r.font.bold = bold
+    def setc(cell, text, size=9, bold=False, color=DARK, fill=None, align=None):
+        cell.text = ""; p = cell.paragraphs[0]
+        if align:
+            p.alignment = align
+        r = p.add_run(text if text is not None else "")
+        r.font.name = FONT; r.font.size = Pt(size); r.font.bold = bold; r.font.color.rgb = rgb(color)
+        if fill:
+            shade(cell, fill)
+
+    def para(text, size, bold=False, color=DARK, space_after=2):
+        p = doc.add_paragraph(); p.paragraph_format.space_after = Pt(space_after)
+        r = p.add_run(text); r.font.name = FONT; r.font.size = Pt(size); r.font.bold = bold
+        r.font.color.rgb = rgb(color)
+        return p
+
+    def issue_table(items):
+        t = doc.add_table(rows=1, cols=5); t.style = "Table Grid"; t.autofit = False
+        for i, hname in enumerate(["#", "位置", "问题", "类型", "修改建议"]):
+            setc(t.rows[0].cells[i], hname, size=9, bold=True, color=WHITE, fill=HDR_BG)
+        for n, it in enumerate(items, 1):
+            c = t.add_row().cells
+            setc(c[0], str(n), size=9, bold=True, color=GRAY, align=AL.CENTER)
+            setc(c[1], _loc(it), size=8, color=GRAY)
+            setc(c[2], it.get("text", ""), size=9, color=DARK)
+            setc(c[3], it.get("kind", ""), size=8, bold=True, color=RED, fill=TYPE_BG)
+            setc(c[4], it.get("note", ""), size=9, color=DARK)
+        for row in t.rows:
+            for i, w in enumerate(COLW):
+                row.cells[i].width = Inches(w)
+        doc.add_paragraph().paragraph_format.space_after = Pt(2)
 
     doc = Document()
-    doc.styles["Normal"].font.name = FONT; doc.styles["Normal"].font.size = Pt(10)
-    p = doc.add_paragraph(); r = p.add_run("校对报告")
-    r.font.name = FONT; r.font.size = Pt(20); r.font.bold = True; r.font.color.rgb = RGBColor(0xC0, 0, 0)
-    doc.add_paragraph(meta.get("product", meta.get("filename", "")))
+    sec = doc.sections[0]
+    sec.orientation = WD_ORIENT.LANDSCAPE
+    sec.page_width, sec.page_height = Inches(11.69), Inches(8.27)
+    sec.left_margin = sec.right_margin = Inches(0.62)
+    try:
+        doc.styles["Normal"].font.name = FONT; doc.styles["Normal"].font.size = Pt(9)
+    except KeyError:
+        pass
+
     st = result.get("stats", {})
+    langs = meta.get("langs", "")
+    # 头部
+    para("校对报告 · PROOFREADING REPORT", 9, bold=True, color=RED, space_after=1)
+    para(meta.get("product", meta.get("filename", "")), 20, bold=True, color=DARK, space_after=2)
+    sub = " 　·　 ".join(x for x in [meta.get("filename", ""), meta.get("pages", ""),
+                                     "说明书类（Apple 技术文档风格）",
+                                     meta.get("date", date.today().isoformat())] if x)
+    para(sub, 9, color=GRAY, space_after=2)
+    para(f"语言覆盖：{langs}", 9, bold=True, color=DARK, space_after=6)
+
+    # 统计四格
+    structural, bylang = _group(result.get("issues", []))
+    lang_count = meta.get("lang_count") or len(bylang) or "—"
+    tiles = [(st.get("total", 0), "问题总数", DARK), (st.get("high", 0), "高优先", AMBER),
+             (st.get("warn", 0), "待确认 / 疑似", AMBER),
+             (lang_count, "语言版本", DARK)]
+    tt = doc.add_table(rows=1, cols=4); tt.style = "Table Grid"
+    for i, (num, label, color) in enumerate(tiles):
+        cell = tt.rows[0].cells[i]; cell.text = ""; p = cell.paragraphs[0]; p.alignment = AL.CENTER
+        r1 = p.add_run(str(num)); r1.font.name = FONT; r1.font.size = Pt(18); r1.font.bold = True
+        r1.font.color.rgb = rgb(color); r1.add_break()
+        r2 = p.add_run(label); r2.font.name = FONT; r2.font.size = Pt(9); r2.font.color.rgb = rgb(GRAY)
+    doc.add_paragraph().paragraph_format.space_after = Pt(4)
+
+    # 审计结论
     if result.get("audit_summary"):
-        h = doc.add_heading(level=2); h.add_run("AI 审计结论（独立审计员把关）").font.name = FONT
-        ap = doc.add_paragraph(); ar = ap.add_run(result["audit_summary"]); ar.font.italic = True; ar.font.name = FONT
-    for sev, (label, _c) in SEV.items():
-        items = [i for i in result["issues"] if i.get("severity") == sev]
-        h = doc.add_heading(level=2); h.add_run(f"{label}（{len(items)}）").font.name = FONT
+        bt = doc.add_table(rows=1, cols=1); bt.style = "Table Grid"
+        setc(bt.rows[0].cells[0], "✔ AI 审计结论（独立审计员把关）： " + result["audit_summary"],
+             size=9, bold=True, color="5B3A8C", fill="F4F0FF")
+        doc.add_paragraph().paragraph_format.space_after = Pt(4)
+
+    # 结构性 / 高优先
+    if structural:
+        bt = doc.add_table(rows=1, cols=1); bt.style = "Table Grid"
+        setc(bt.rows[0].cells[0], "⚠ 结构性 / 跨语言高优先问题（建议设计与产品侧优先处理）",
+             size=9.5, bold=True, color=AMBER, fill=BANNER_BG)
+        issue_table(structural)
+
+    # 按语言分节
+    for code, name in LANG_NAMES:
+        items = bylang.get(code)
         if not items:
-            doc.add_paragraph("（无）"); continue
-        t = doc.add_table(rows=1, cols=5); t.style = "Table Grid"
-        for i, c in enumerate(["代号", "位置", "原文", "类型", "建议/说明"]):
-            setc(t.rows[0].cells[i], c, bold=True); shade(t.rows[0].cells[i], "D5E8F0")
-        for it in items:
-            loc = (it.get("lang") or "—") + (f" · L{it['line']}" if it.get("line") else "")
-            cells = t.add_row().cells
-            for i, v in enumerate([it.get("code", ""), loc, it.get("text", ""), it.get("kind", ""), it.get("note", "")]):
-                setc(cells[i], str(v))
-    doc.add_heading(level=2).add_run("说明与边界").font.name = FONT
+            continue
+        para(f"{code}  {name}    · {len(items)} 处", 12, bold=True, color=RED, space_after=2)
+        issue_table(items)
+    for other, items in bylang.items():
+        if other in NAME:
+            continue
+        para(f"{other}    · {len(items)} 处", 12, bold=True, color=RED, space_after=2)
+        issue_table(items)
+
+    # 边界
+    para("说明与边界", 11, bold=True, color=DARK, space_after=2)
     for line in ["本报告为线索层，不替代视觉终审。",
-                 "四条铁律：只校产品内容 / 禁止编造 / OCR 不纠错 / 截断不补全。"]:
-        doc.add_paragraph(line, style="List Bullet")
+                 "四条铁律：只校产品内容 / 禁止编造 / OCR 不纠错 / 截断不补全。",
+                 "事实真伪、纯视觉乱码、语义型交叉引用需人工 + 联网最终确认。"]:
+        p = doc.add_paragraph(line, style="List Bullet")
+        for r in p.runs:
+            r.font.name = FONT; r.font.size = Pt(8); r.font.color.rgb = rgb(GRAY)
     doc.save(out_path)
+    return out_path
+
+
+# ================================================================ HTML（同款排版）
+def _rows_html(items):
+    r = ['<table><tr><th>#</th><th>位置</th><th>问题</th><th>类型</th><th>修改建议</th></tr>']
+    for n, it in enumerate(items, 1):
+        r.append(
+            f'<tr><td class="i">{n}</td><td class="loc">{_h.escape(_loc(it))}</td>'
+            f'<td>{_h.escape(it.get("text",""))}</td>'
+            f'<td class="ty">{_h.escape(it.get("kind",""))}</td>'
+            f'<td>{_h.escape(it.get("note",""))}</td></tr>')
+    r.append('</table>')
+    return "".join(r)
+
+
+def build_html(meta, result, out_path):
+    st = result.get("stats", {})
+    structural, bylang = _group(result.get("issues", []))
+    body = ""
+    if result.get("audit_summary"):
+        body += f'<div class="audit"><b>✔ AI 审计结论（独立审计员把关）：</b>{_h.escape(result["audit_summary"])}</div>'
+    if structural:
+        body += '<div class="banner">⚠ 结构性 / 跨语言高优先问题（建议设计与产品侧优先处理）</div>' + _rows_html(structural)
+    for code, name in LANG_NAMES:
+        items = bylang.get(code)
+        if items:
+            body += f'<h2>{code}　{name}　· {len(items)} 处</h2>' + _rows_html(items)
+    for other, items in bylang.items():
+        if other not in NAME:
+            body += f'<h2>{_h.escape(other)}　· {len(items)} 处</h2>' + _rows_html(items)
+    tiles = [(st.get("total", 0), "问题总数", DARK), (st.get("high", 0), "高优先", AMBER),
+             (st.get("warn", 0), "待确认 / 疑似", AMBER),
+             (meta.get("lang_count") or len(bylang) or "—", "语言版本", DARK)]
+    tilehtml = "".join(f'<div><b style="color:#{c}">{n}</b><span>{_h.escape(l)}</span></div>'
+                       for n, l, c in tiles)
+    sub = " 　·　 ".join(x for x in [meta.get("filename", ""), meta.get("pages", ""),
+                                     "说明书类（Apple 技术文档风格）",
+                                     meta.get("date", date.today().isoformat())] if x)
+    doc = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>校对报告 · {_h.escape(meta.get('product',''))}</title><style>
+body{{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;max-width:1100px;margin:0 auto;padding:28px 22px;color:#1d1d1f;line-height:1.6}}
+.kicker{{color:#{RED};font-weight:700;font-size:13px;letter-spacing:.04em}}
+h1{{font-size:30px;margin:2px 0;color:#1d1d1f}}
+.sub{{color:#{GRAY};font-size:13px;margin:2px 0}} .cov{{font-weight:700;font-size:13px;margin:4px 0 14px}}
+.tiles{{display:flex;gap:10px;margin:12px 0 18px}} .tiles div{{border:1px solid #e5e5e7;border-radius:10px;padding:10px 22px;text-align:center}}
+.tiles b{{font-size:26px;display:block;line-height:1.1}} .tiles span{{font-size:12px;color:#{GRAY}}}
+.banner{{background:#{BANNER_BG};color:#{AMBER};font-weight:700;font-size:13px;padding:8px 12px;border-radius:6px;margin:16px 0 8px}}
+.audit{{background:#f4f0ff;border-left:4px solid #5b3a8c;padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px}}
+h2{{color:#{RED};font-size:17px;margin:22px 0 6px}}
+table{{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:13px}}
+th{{background:#{HDR_BG};color:#fff;font-weight:700;padding:6px 8px;text-align:left;font-size:12px}}
+td{{border:1px solid #e5e5e7;padding:6px 8px;vertical-align:top}}
+td.i{{color:#{GRAY};font-weight:700;text-align:center;width:32px}} td.loc{{color:#{GRAY};font-size:12px;white-space:nowrap}}
+td.ty{{background:#{TYPE_BG};color:#{RED};font-weight:700;font-size:12px;white-space:nowrap}}
+.boundary{{margin-top:22px;color:#{GRAY};font-size:12px;border-top:1px solid #e5e5e7;padding-top:10px}}
+</style></head><body>
+<div class="kicker">校对报告 · PROOFREADING REPORT</div>
+<h1>{_h.escape(meta.get('product', meta.get('filename','')))}</h1>
+<div class="sub">{_h.escape(sub)}</div>
+<div class="cov">语言覆盖：{_h.escape(meta.get('langs',''))}</div>
+<div class="tiles">{tilehtml}</div>
+{body}
+<div class="boundary">本报告为线索层，不替代视觉终审。四条铁律：只校产品内容 / 禁止编造 / OCR 不纠错 / 截断不补全。
+事实真伪、纯视觉乱码、语义型交叉引用需人工 + 联网最终确认。</div>
+</body></html>"""
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(doc)
     return out_path
 
 
@@ -120,7 +242,6 @@ if __name__ == "__main__":
     meta = data.get("meta", {})
     result = {"issues": data.get("issues", []), "stats": data.get("stats", {}),
               "audit_summary": data.get("audit_summary", "")}
-    h = build_html(meta, result, f"{out_dir}/report.html")
-    print(f"✓ HTML: {h}")
+    print("✓ HTML:", build_html(meta, result, f"{out_dir}/report.html"))
     d = build_docx(meta, result, f"{out_dir}/report.docx")
-    print(f"✓ Word: {d}" if d else "· Word 跳过（pip install python-docx 后可生成）")
+    print("✓ Word:", d) if d else print("· Word 跳过（pip install python-docx）")

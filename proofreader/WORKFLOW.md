@@ -40,7 +40,14 @@
 
 ### 第 5 步 · 合并
 把 `det.json` 与 `ai.json` 的 issues 合并为 `work/merged.json`，结构：
-`{"meta":{...}, "issues":[...], "stats":{...}}`（meta 含 filename/product/langs/date）。
+```json
+{"meta":{"filename":"原文件名.pdf","product":"产品名 · 说明书","pages":"68 页",
+         "langs":"EN / ES / DE / FR / IT / JP","lang_count":6,"date":"2026-06-16"},
+ "issues":[...], "stats":{"total":N,"high":H,"warn":W,"low":L}}
+```
+报告会**套用 VCD 校对报告模板**（横向 A4·红黑灰·按语言分节），所以每条 issue 务必带：
+- `section`：归属语言版本 `EN|ES|DE|FR|IT|JP`，或跨语言/结构性问题填 `结构性`（会进顶部高优先表）；
+- `loc`：位置，如 `p05 Note` / `目录页`（没有就用 `L行号`）。
 
 ### 第 6 步 · 独立审计（L5）★关键，不能省★
 **用 Task 工具开一个全新子代理**（独立上下文 = 消除"自己审自己"的确认偏误），
@@ -68,8 +75,10 @@
 
 ## finding 字段 schema（L1/L2/L3 统一）
 ```json
-{"code":"AI-XLANG","severity":"high|warn|low","kind":"简短类型",
- "lang":"如 DE←EN 或 —","line":行号或null,"text":"原文逐字片段(<=160)",
- "note":"理由+建议；事实类附URL；高/中类注明 需人工确认","confidence":0.0}
+{"code":"AI-XLANG","severity":"high|warn|low","section":"EN|ES|DE|FR|IT|JP|结构性",
+ "kind":"简短类型(进报告“类型”列)","lang":"如 DE←EN 或 —","loc":"p05 Note 或 L行号",
+ "line":行号或null,"text":"原文逐字片段(<=160，进“问题”列)",
+ "note":"理由+建议(进“修改建议”列)；事实类附URL；高/中类注明 需人工确认","confidence":0.0}
 ```
-严重度：`high` 高优先 / `warn` 疑似·待确认 / `low` 低优先。
+严重度：`high` 高优先（进顶部结构性表）/ `warn` 疑似·待确认 / `low` 低优先。
+报告列映射：# ← 序号 · 位置 ← `loc` · 问题 ← `text` · 类型 ← `kind` · 修改建议 ← `note`。

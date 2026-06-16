@@ -33,11 +33,12 @@ def check_power(text):
             a = a / 1000.0
         w = _num(m.group(4))
         calc = v * a
+        ln = _line_of(text, m.start())
         # 允许 2% 取整误差
         if abs(calc - w) > max(0.5, w * 0.02):
             out.append({
                 "code": "F-PWR", "severity": "high", "kind": "功率算术不自洽",
-                "lang": "全语言", "line": _line_of(text, m.start()),
+                "section": "结构性", "lang": "全语言", "line": ln, "loc": f"L{ln}",
                 "text": m.group(0).strip()[:160],
                 "note": f"实算 {v:g}×{a:g}={calc:g}W ≠ 标称 {w:g}W；改电压/电流 或 改标称（二择一）",
             })
@@ -61,9 +62,10 @@ def check_unit_spacing(text):
         if tok in seen:
             continue
         seen.add(tok)
+        ln = _line_of(text, m.start())
         out.append({
             "code": "UNIT", "severity": "low", "kind": "单位空格",
-            "lang": "—", "line": _line_of(text, m.start()), "text": tok,
+            "section": "结构性", "lang": "—", "line": ln, "loc": f"L{ln}", "text": tok,
             "note": f"数字与单位间建议加空格：{m.group(1)} {m.group(2)}（以原稿为准）",
         })
     return out
@@ -71,20 +73,26 @@ def check_unit_spacing(text):
 
 # ---- 风格·禁用客套词（说明书走技术文档风格）----
 FORBIDDEN = re.compile(r"\b(please|bitte|veuillez|por favor|s'il vous pla[iî]t|per favore)\b", re.I)
+# 客套词 → 语言归属（用于按语言分节）
+FW_LANG = {"please": "EN", "bitte": "DE", "veuillez": "FR", "s'il vous plait": "FR",
+           "s'il vous plaît": "FR", "por favor": "ES", "per favore": "IT"}
 
 
 def check_forbidden(text):
     out, seen = [], set()
     for m in FORBIDDEN.finditer(text):
-        key = (m.group(0).lower(), _line_of(text, m.start()))
+        ln = _line_of(text, m.start())
+        word = m.group(0)
+        key = (word.lower(), ln)
         if key in seen:
             continue
         seen.add(key)
+        sec = FW_LANG.get(word.lower(), "—")
         out.append({
             "code": "STY-FW", "severity": "low", "kind": "风格·禁用词",
-            "lang": "—", "line": _line_of(text, m.start()),
-            "text": m.group(0),
-            "note": f"技术文档风格建议去掉客套词「{m.group(0)}」，改祈使句",
+            "section": sec, "lang": sec, "line": ln, "loc": f"L{ln}",
+            "text": word,
+            "note": f"技术文档风格建议去掉客套词「{word}」，改祈使句",
         })
     return out
 
