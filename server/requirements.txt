@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+python-multipart
+ocrmypdf
+opendataloader-pdf
+langdetect
+python-docx

@@ -1,0 +1,19 @@
+# systemd 单元（可选，开机自启 + 崩溃自动重启）
+# 1) 改 WorkingDirectory / User 为实际路径与用户
+# 2) sudo cp ocr-proofread.service /etc/systemd/system/
+# 3) sudo systemctl enable --now ocr-proofread
+[Unit]
+Description=OCR Proofread Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/server
+ExecStart=/bin/bash /home/ubuntu/server/run.sh
+Environment=PORT=8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

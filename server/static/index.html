@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>转曲 PDF 校对预处理</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--fg:#e7ebf2;--mut:#9aa4b2;--accent:#5b8cff;--hi:#ff6b6b;--warn:#f0a83a;--low:#6b7585;--ok:#46c08b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:22px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 24px;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+  #drop{border:1.5px dashed var(--line);border-radius:12px;padding:34px;text-align:center;cursor:pointer;transition:.15s}
+  #drop.over{border-color:var(--accent);background:#1b2230}
+  #drop b{color:var(--accent)}
+  .langs{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+  .langs label{border:1px solid var(--line);border-radius:20px;padding:5px 12px;font-size:13px;cursor:pointer;user-select:none}
+  .langs input{margin-right:6px;vertical-align:-1px}
+  .langs label:has(input:checked){border-color:var(--accent);color:#cfe0ff;background:#19233a}
+  button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:11px 20px;font-size:15px;cursor:pointer;font-weight:600}
+  button:disabled{opacity:.5;cursor:default}
+  .bar{height:8px;background:#0c0f15;border-radius:6px;overflow:hidden;margin:12px 0}
+  .bar i{display:block;height:100%;width:30%;background:var(--accent);border-radius:6px;transition:width .4s}
+  .stages{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
+  .stages span{padding:3px 9px;border-radius:14px;border:1px solid var(--line)}
+  .stages span.act{color:#fff;border-color:var(--accent);background:#19233a}
+  .stages span.done{color:var(--ok);border-color:#22402f}
+  .stat{display:flex;gap:18px;margin:6px 0 14px}
+  .stat div{font-size:13px;color:var(--mut)} .stat b{display:block;font-size:24px;color:var(--fg)}
+  .stat .h b{color:var(--hi)} .stat .w b{color:var(--warn)} .stat .l b{color:var(--low)}
+  .issue{border-left:3px solid var(--line);padding:8px 12px;margin:8px 0;background:#12151c;border-radius:0 8px 8px 0}
+  .issue.high{border-color:var(--hi)} .issue.warn{border-color:var(--warn)} .issue.low{border-color:var(--low)}
+  .issue .t{font-size:13px;color:var(--mut)} .issue code{background:#0c0f15;padding:1px 6px;border-radius:5px;color:#dfe6f0;font-size:13px}
+  .issue .n{font-size:12.5px;color:var(--mut);margin-top:3px}
+  .dl a{display:inline-block;margin:4px 8px 0 0;padding:8px 14px;border:1px solid var(--line);border-radius:9px;color:#cfe0ff;text-decoration:none;font-size:13px}
+  .dl a:hover{border-color:var(--accent)}
+  .note{font-size:12px;color:var(--mut);margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+  .hidden{display:none}
+  .err{color:var(--hi);white-space:pre-wrap;font-size:13px}
+</style>
+</head>
+<body><div class="wrap">
+  <h1>转曲 PDF 校对预处理</h1>
+  <p class="sub">无文字层 PDF → 多语种 OCR + 结构化 + 自动校对检查（线索层，不替代视觉终审）</p>
+
+  <div class="card" id="panel-input">
+    <div id="drop"><b>点击或拖入 PDF / Word</b><div class="t" style="color:var(--mut);font-size:13px;margin-top:6px">支持转曲 PDF 与 .docx；仅本机/局域网处理，不外传</div>
+      <input id="file" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden"/></div>
+    <div id="picked" class="t" style="margin-top:10px;color:var(--mut)"></div>
+    <div class="langs" id="langs">
+      <label><input type="checkbox" value="eng" checked>英 eng</label>
+      <label><input type="checkbox" value="deu" checked>德 deu</label>
+      <label><input type="checkbox" value="fra" checked>法 fra</label>
+      <label><input type="checkbox" value="spa" checked>西 spa</label>
+      <label><input type="checkbox" value="ita" checked>意 ita</label>
+      <label><input type="checkbox" value="jpn" checked>日 jpn</label>
+      <label><input type="checkbox" value="chi_sim">中 chi_sim</label>
+      <label><input type="checkbox" value="kor">韩 kor</label>
+    </div>
+    <div style="margin-top:14px"><button id="go" disabled>开始处理</button></div>
+  </div>
+
+  <div class="card hidden" id="panel-prog">
+    <div class="stages" id="stages">
+      <span data-s="ocr">OCR</span><span data-s="text">提取文本</span>
+      <span data-s="structure">结构化</span><span data-s="checks">校对检查</span><span data-s="done">完成</span>
+    </div>
+    <div class="bar"><i id="barfill"></i></div>
+    <div class="t" id="msg" style="color:var(--mut)"></div>
+  </div>
+
+  <div class="card hidden" id="panel-result">
+    <div class="stat">
+      <div class="h"><b id="s-h">0</b>高优先</div>
+      <div class="w"><b id="s-w">0</b>疑似串版</div>
+      <div class="l"><b id="s-l">0</b>低优先</div>
+    </div>
+    <div class="dl" id="dl"></div>
+    <div id="issues" style="margin-top:14px"></div>
+    <div class="note">说明：高优先（功率算术不自洽、NVRAM 等事实待核实）建议优先处理；疑似串版为高召回候选，逐条人工确认；低优先（单位空格、禁用词）以矢量原稿为准。最终文字与版面仍需逐页视觉终审。</div>
+  </div>
+
+  <div class="card hidden" id="panel-err"><div class="err" id="errmsg"></div></div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let picked=null;
+const drop=$("#drop"),fileEl=$("#file");
+drop.onclick=()=>fileEl.click();
+["dragover","dragenter"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",ev=>{if(ev.dataTransfer.files[0])setFile(ev.dataTransfer.files[0])});
+fileEl.onchange=()=>{if(fileEl.files[0])setFile(fileEl.files[0])};
+function setFile(f){picked=f;$("#picked").textContent="已选择："+f.name;$("#go").disabled=false}
+
+$("#go").onclick=async()=>{
+  if(!picked)return;
+  const langs=[...document.querySelectorAll("#langs input:checked")].map(c=>c.value).join("+")||"eng";
+  $("#go").disabled=true;$("#panel-prog").classList.remove("hidden");
+  $("#panel-result").classList.add("hidden");$("#panel-err").classList.add("hidden");
+  const fd=new FormData();fd.append("file",picked);fd.append("langs",langs);
+  let r;try{r=await(await fetch("/api/jobs",{method:"POST",body:fd})).json()}catch(e){return showErr(e)}
+  if(!r.job_id)return showErr(JSON.stringify(r));
+  poll(r.job_id);
+};
+const STAGES=["ocr","text","structure","checks","done"];
+function poll(id){
+  const t=setInterval(async()=>{
+    let j;try{j=await(await fetch("/api/jobs/"+id)).json()}catch(e){return}
+    $("#msg").textContent=j.message||"";
+    const idx=STAGES.indexOf(j.stage);
+    document.querySelectorAll("#stages span").forEach(s=>{
+      const i=STAGES.indexOf(s.dataset.s);s.className="";
+      if(i<idx||j.stage==="done")s.classList.add("done");if(i===idx)s.classList.add("act");
+    });
+    $("#barfill").style.width=Math.max(8,(idx+1)/STAGES.length*100)+"%";
+    if(j.status==="done"){clearInterval(t);render(id,j)}
+    if(j.status==="error"){clearInterval(t);showErr(j.message)}
+  },1500);
+}
+function render(id,j){
+  $("#panel-result").classList.remove("hidden");$("#go").disabled=false;
+  $("#s-h").textContent=j.stats.high;$("#s-w").textContent=j.stats.warn;$("#s-l").textContent=j.stats.low;
+  const D=$("#dl");D.innerHTML="";
+  const map={docx:"校对报告 (Word)",report:"校对报告 (Markdown)",md:"结构化 Markdown",ocr_pdf:"可搜索 PDF"};
+  for(const k in map)if(j.downloads[k])D.innerHTML+=`<a href="/api/jobs/${id}/download/${k}">⬇ ${map[k]}</a>`;
+  const box=$("#issues");box.innerHTML="";
+  (j.issues||[]).forEach(it=>{
+    const loc=it.line?("L"+it.line):"—";
+    box.innerHTML+=`<div class="issue ${it.severity}"><div class="t">[${it.code}] ${it.kind} · ${it.lang} · ${loc}</div>
+      <div><code>${escapeHtml(it.text)}</code></div><div class="n">${escapeHtml(it.note)}</div></div>`;
+  });
+  if(!(j.issues||[]).length)box.innerHTML='<div class="t">未触发自动检查项（仍需视觉终审）。</div>';
+}
+function showErr(m){$("#panel-err").classList.remove("hidden");$("#errmsg").textContent="出错："+m;$("#go").disabled=false}
+function escapeHtml(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+</script>
+</body></html>
