@@ -2,6 +2,7 @@
 # app.py — 转曲 PDF 校对预处理 Web 服务（FastAPI）
 # 上传 PDF -> OCRmyPDF 加文字层 -> opendataloader 结构化 -> checks 自动校对 -> 下载 + 问题清单
 import os, re, sys, uuid, glob, shutil, threading, subprocess, traceback
+import concurrent.futures
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -30,6 +31,43 @@ def _run(cmd, **kw):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw)
 
 
+def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
+    """逐页并行 OCR：渲染 → tesseract 单页可搜索 PDF → 合并；带实时「第 X/N 页」进度。"""
+    d = out_pdf.parent
+    info = _run(["pdfinfo", str(in_path)]).stdout
+    m = re.search(r"Pages:\s+(\d+)", info)
+    pages = int(m.group(1)) if m else 1
+    pdir = d / "pg"
+    pdir.mkdir(exist_ok=True)
+    _set(job_id, message=f"OCR：共 {pages} 页，多语种处理中…")
+    done = [0]
+    lk = threading.Lock()
+
+    def one(i: int) -> None:
+        pre = pdir / f"p{i:04d}"
+        _run(["pdftoppm", "-r", "300", "-png", "-singlefile",
+              "-f", str(i), "-l", str(i), str(in_path), str(pre)])
+        try:
+            _run(["timeout", "300", "tesseract", f"{pre}.png", str(pre), "-l", langs, "pdf"])
+        except subprocess.CalledProcessError:
+            _run(["pdftoppm", "-r", "150", "-pdf", "-f", str(i), "-l", str(i), str(in_path), str(pre)])
+        try:
+            Path(f"{pre}.png").unlink()
+        except OSError:
+            pass
+        with lk:
+            done[0] += 1
+            _set(job_id, message=f"OCR 第 {done[0]}/{pages} 页…")
+
+    workers = max(1, min(4, os.cpu_count() or 2))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        for _ in ex.map(one, range(1, pages + 1)):
+            pass
+    outs = sorted(glob.glob(str(pdir / "p*.pdf")))
+    _run(["pdfunite", *outs, str(out_pdf)])
+    return pages
+
+
 def extract_docx_text(path: str) -> str:
     """按文档顺序抽出 Word 段落 + 表格文本（供校对检查）。"""
     from docx import Document as DocxDocument
@@ -55,9 +93,8 @@ def process(job_id: str, in_path: Path, langs: str, ext: str) -> None:
     langs_label = langs if is_pdf else "Word(.docx) · 无需 OCR"
     try:
         if is_pdf:
-            _set(job_id, stage="ocr", message="OCRmyPDF 加文字层中（多语种较慢，请耐心）…")
-            _run(["ocrmypdf", "--force-ocr", "-l", langs, "--output-type", "pdf",
-                  "--optimize", "0", str(in_path), str(ocr_pdf)])
+            _set(job_id, stage="ocr", message="OCR 准备中…")
+            _ocr_pages(job_id, in_path, ocr_pdf, langs)
 
             _set(job_id, stage="text", message="提取文本…")
             txt = _run(["pdftotext", "-layout", str(ocr_pdf), "-"]).stdout
