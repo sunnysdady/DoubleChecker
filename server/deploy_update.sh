@@ -17,10 +17,15 @@ echo "▶ 源代码: $SRC"
 echo "▶ 安装到: $DEST"
 [ -d "$DEST" ] || { echo "✗ 安装目录不存在: $DEST （用第一个参数指定正确目录）"; exit 1; }
 
-echo "▶ [1/4] 拷贝最新代码…"
+echo "▶ [1/4] 拷贝最新代码 + 校验系统依赖…"
 cp "$SRC"/*.py "$DEST"/
 mkdir -p "$DEST/static"
 cp "$SRC/static/"* "$DEST/static/" 2>/dev/null || true
+# OCR 依赖 poppler-utils(pdfinfo/pdftoppm/pdftotext/pdfunite)，缺则补装
+if ! command -v pdfinfo >/dev/null 2>&1; then
+  echo "  · 缺 poppler-utils，正在安装…"
+  apt-get install -y poppler-utils >/dev/null 2>&1 && echo "  ✓ poppler-utils 已装" || echo "  ✗ 安装失败，请手动: apt-get install -y poppler-utils"
+fi
 
 echo "▶ [2/4] 准备 AI 配置文件 ai.env…"
 if [ ! -f "$DEST/ai.env" ]; then

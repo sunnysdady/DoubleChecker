@@ -121,14 +121,14 @@ def process(job_id: str, in_path: Path, langs: str, ext: str) -> None:
         _set(job_id, stage="checks", message="运行自动校对检查…")
         result = checks.run_all(md_text)
 
-        # AI 语义层（L2）：跨语言对齐。需配置 AI_API_KEY，否则整层跳过；失败不影响既有结果。
+        # AI 层（L2 跨语言对齐 → L3 联网事实核查 → L5 审计员把关）。
+        # 需配置 AI_API_KEY，否则整层跳过；逐层失败降级，不影响既有结果。
         try:
             import ai_checks
             if ai_checks.enabled():
-                _set(job_id, stage="checks", message="AI 跨语言对齐校验…")
-                ai_res = ai_checks.run_ai(md_text)
-                if ai_res["issues"]:
-                    result = ai_checks.merge(result, ai_res["issues"])
+                result = ai_checks.run_pipeline(
+                    md_text, result,
+                    progress=lambda m: _set(job_id, stage="checks", message=m))
         except Exception:
             pass
 
@@ -138,6 +138,8 @@ def process(job_id: str, in_path: Path, langs: str, ext: str) -> None:
                f"统计：高优先 {result['stats']['high']} · 疑似串版 {result['stats']['warn']} · 低优先 {result['stats']['low']}",
                "", "> 本报告为「线索层」：自动机械检查，不替代视觉终审。",
                "> 串版为高召回候选，需人工确认；OCR 疑似错字/截断不纠错、不补全。", ""]
+        if result.get("audit_summary"):
+            rep += ["## AI 审计结论", "> " + result["audit_summary"], ""]
         cur = None
         for it in result["issues"]:
             sev = {"high": "## 高优先", "warn": "## 疑似串版（需人工确认）", "low": "## 低优先"}[it["severity"]]

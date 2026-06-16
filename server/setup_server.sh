@@ -8,7 +8,7 @@ sudo apt-get install -y \
   tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-fra \
   tesseract-ocr-spa tesseract-ocr-ita tesseract-ocr-jpn \
   tesseract-ocr-chi-sim tesseract-ocr-kor \
-  ghostscript default-jre python3-pip python3-venv
+  poppler-utils ghostscript default-jre python3-pip python3-venv
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "▶ 建虚拟环境并装 Python 依赖…"
