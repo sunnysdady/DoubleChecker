@@ -31,6 +31,15 @@ def _run(cmd, **kw):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw)
 
 
+# OCR 可调参数（环境变量）：
+#   OCR_DPI     渲染分辨率，默认 300；降到 200 明显更快，精度略降（数值/型号建议保持 300）
+#   OCR_WORKERS 逐页并行数，默认 = CPU 核数（上限 6，避免多语种模型并发吃满内存）
+OCR_DPI = os.environ.get("OCR_DPI", "300")
+OCR_WORKERS = int(os.environ.get("OCR_WORKERS", "0") or 0)
+# 关闭 tesseract 内部 OpenMP 多线程：我们已按页并行，内部再开线程只会互相争抢拖慢
+_TESS_ENV = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+
+
 def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
     """逐页并行 OCR：渲染 → tesseract 单页可搜索 PDF → 合并；带实时「第 X/N 页」进度。"""
     d = out_pdf.parent
@@ -39,18 +48,21 @@ def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
     pages = int(m.group(1)) if m else 1
     pdir = d / "pg"
     pdir.mkdir(exist_ok=True)
-    _set(job_id, message=f"OCR：共 {pages} 页，多语种处理中…")
+    nlang = len([x for x in langs.split("+") if x])
+    _set(job_id, message=f"OCR：共 {pages} 页 × {nlang} 语种，{OCR_DPI}dpi 处理中…")
     done = [0]
     lk = threading.Lock()
+    lo_dpi = str(min(int(OCR_DPI), 150))
 
     def one(i: int) -> None:
         pre = pdir / f"p{i:04d}"
-        _run(["pdftoppm", "-r", "300", "-png", "-singlefile",
+        _run(["pdftoppm", "-r", OCR_DPI, "-png", "-singlefile",
               "-f", str(i), "-l", str(i), str(in_path), str(pre)])
         try:
-            _run(["timeout", "300", "tesseract", f"{pre}.png", str(pre), "-l", langs, "pdf"])
+            _run(["timeout", "300", "tesseract", f"{pre}.png", str(pre), "-l", langs, "pdf"],
+                 env=_TESS_ENV)
         except subprocess.CalledProcessError:
-            _run(["pdftoppm", "-r", "150", "-pdf", "-f", str(i), "-l", str(i), str(in_path), str(pre)])
+            _run(["pdftoppm", "-r", lo_dpi, "-pdf", "-f", str(i), "-l", str(i), str(in_path), str(pre)])
         try:
             Path(f"{pre}.png").unlink()
         except OSError:
@@ -59,7 +71,7 @@ def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
             done[0] += 1
             _set(job_id, message=f"OCR 第 {done[0]}/{pages} 页…")
 
-    workers = max(1, min(4, os.cpu_count() or 2))
+    workers = OCR_WORKERS or max(1, min(6, os.cpu_count() or 2))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         for _ in ex.map(one, range(1, pages + 1)):
             pass
