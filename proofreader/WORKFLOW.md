@@ -42,9 +42,13 @@
 把 `det.json` 与 `ai.json` 的 issues 合并为 `work/merged.json`，结构：
 ```json
 {"meta":{"filename":"原文件名.pdf","product":"产品名 · 说明书","pages":"68 页",
-         "langs":"EN / ES / DE / FR / IT / JP","lang_count":6,"date":"2026-06-16"},
+         "langs":"EN / ES / DE / FR / IT / JP","lang_count":6,"date":"2026-06-16",
+         "sections":{"EN":{"range":"01–10","status":"术语统一 ✓"},
+                     "ES":{"range":"11–20","status":"USB 术语正确 ✓"}}},
  "issues":[...], "stats":{"total":N,"high":H,"warn":W,"low":L}}
 ```
+`meta.sections[语言]`：该语种 `range` 内页范围 + `status` 状态徽标（绿勾结论，如「术语统一 ✓」「含 FCC ✓」），
+用于报告里每个语言节的标题徽标，没有就留空。
 报告会**套用 VCD 校对报告模板**（横向 A4·红黑灰·按语言分节），所以每条 issue 务必带：
 - `section`：归属语言版本 `EN|ES|DE|FR|IT|JP`，或跨语言/结构性问题填 `结构性`（会进顶部高优先表）；
 - `loc`：位置，如 `p05 Note` / `目录页`（没有就用 `L行号`）。
