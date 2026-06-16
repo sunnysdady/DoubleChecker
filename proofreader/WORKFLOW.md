@@ -14,11 +14,18 @@
 
 ## 执行步骤（Claude 必须逐步做，不可跳步）
 
-### 第 1 步 · 读图提文（L0）
-逐页阅读 PDF，输出忠实的纯文本到 `work/extracted.txt`，要求：
-- **每页以 `=== P{页码} ===` 起头**，尽量保留行结构；
-- 读不准的字/符号就地标 `〔读不准:你的猜测〕`，**不要擅自纠正**（铁律 3）；
-- 多语种分栏的，按"语言块"顺序抄录。
+### 第 1 步 · 取文（L0）—— 按所用模型二选一
+**A. 有视觉的模型（Claude 等）**：直接逐页阅读 PDF，输出忠实纯文本到 `work/extracted.txt`：
+- 每页以 `=== P{页码} ===` 起头，尽量保留行结构；
+- 读不准的字/符号就地标 `〔读不准:猜测〕`，不擅自纠正（铁律 3）；多语种分栏按"语言块"顺序抄录。
+
+**B. 无视觉的模型（DeepSeek 等，必须先 OCR，否则全是乱码）**：先跑 OCR 脚本，再用产出的文本：
+```bash
+bash proofreader/ocr.sh 你的文件.pdf eng+deu+fra+spa+ita+jpn
+```
+产出 `work/extracted.md`（结构化，优先）和 `work/extracted.txt`。后续步骤一律基于该文本。
+> 转曲 PDF 必须 `--force-ocr`（脚本已带）；缺哪种语言包哪种就乱码，脚本会提示补装。
+> 用哪些语言由实际说明书决定（日文务必装 `tesseract-ocr-jpn`）。
 
 ### 第 2 步 · 确定性检查（L1，走代码=100% 可复现）
 运行：`python3 proofreader/checks.py work/extracted.txt > work/det.json`

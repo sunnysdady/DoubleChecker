@@ -18,7 +18,18 @@ Claude 会：读图提文 → 跑 `checks.py` 确定性检查 → AI 语义检�
 | `WORKFLOW.md` | 工作流指令（Claude 照此 8 步执行，含独立审计员 prompt） |
 | `checks.py` | 确定性检查（功率算术 / 单位空格 / 禁用词）·纯 Python 零依赖·可独立跑 |
 | `report.py` | 由 findings 生成自包含 HTML + Word(.docx) |
+| `ocr.sh` | **无视觉模型（DeepSeek 等）必用**：OCRmyPDF 把转曲 PDF 转文本 + opendataloader 结构化 |
 | `requirements.txt` | `python-docx`（仅 Word 报告需要；HTML 无依赖） |
+
+## 用哪种模型？取文方式不同
+- **有视觉的模型（Claude）**：直接读 PDF，无需 OCR、零安装。
+- **无视觉的模型（DeepSeek / gateway）**：PDF 它看不懂会乱码，**必须先 OCR**：
+  ```bash
+  # 一次性装：sudo apt-get install -y tesseract-ocr tesseract-ocr-{deu,fra,spa,ita,jpn} poppler-utils ghostscript default-jre
+  #           pip install ocrmypdf opendataloader-pdf
+  bash proofreader/ocr.sh 你的文件.pdf eng+deu+fra+spa+ita+jpn
+  ```
+  得到 `work/extracted.md`（结构化）/ `work/extracted.txt`，再走 WORKFLOW.md 校对。
 
 ## 单独跑确定性检查（不依赖 AI）
 ```bash
