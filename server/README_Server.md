@@ -67,6 +67,26 @@ sudo systemctl status ocr-proofread        # 查看状态
 
 - `PORT`（默认 8000）、`HOST`（默认 0.0.0.0）、`JOBS_DIR`（默认 /tmp/ocr_jobs）。
 
+### AI 语义层（L2 · 跨语言对齐，可选）
+
+不配 `AI_API_KEY` 时本层**完全关闭**，行为与原零-API 版一致。配置后会在机械检查之外，追加「AI 跨语言对齐」候选（数字/型号跨语种不一致、漏译、明显误译），每条都经**逐字原文核验**才入库（对不上即丢，防幻觉），并标注置信度、注明「需人工确认」。
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `AI_API_KEY` | 模型密钥（缺省则关闭本层） | — |
+| `AI_PROVIDER` | `deepseek` / `claude` / `openai` | `deepseek` |
+| `AI_MODEL` | 模型名 | deepseek→`deepseek-chat`；claude→`claude-sonnet-4-6` |
+| `AI_BASE_URL` | OpenAI 兼容端点 | deepseek→`https://api.deepseek.com` |
+| `AI_MAX_CHUNKS` | 最多送检分片数（控成本） | `12` |
+| `AI_CHUNK_CHARS` | 每片字符数 | `6000` |
+
+```bash
+# 用 DeepSeek（高性价比，主力）
+export AI_PROVIDER=deepseek AI_API_KEY=sk-xxx        # AI_MODEL 可指定具体型号
+# 或切 Claude（细微语义更稳，按需）
+export AI_PROVIDER=claude   AI_API_KEY=sk-ant-xxx AI_MODEL=claude-sonnet-4-6
+```
+
 ## 故障排查
 
 - `opendataloader` 报错：确认 `default-jre` 已装（`java -version`）。本服务已用 `--image-output off` 规避大页渲染崩溃。

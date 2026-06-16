@@ -121,6 +121,17 @@ def process(job_id: str, in_path: Path, langs: str, ext: str) -> None:
         _set(job_id, stage="checks", message="运行自动校对检查…")
         result = checks.run_all(md_text)
 
+        # AI 语义层（L2）：跨语言对齐。需配置 AI_API_KEY，否则整层跳过；失败不影响既有结果。
+        try:
+            import ai_checks
+            if ai_checks.enabled():
+                _set(job_id, stage="checks", message="AI 跨语言对齐校验…")
+                ai_res = ai_checks.run_ai(md_text)
+                if ai_res["issues"]:
+                    result = ai_checks.merge(result, ai_res["issues"])
+        except Exception:
+            pass
+
         # 生成报告 md
         rep = [f"# 校对自动检查报告\n", f"**文件**：{JOBS[job_id]['filename']}",
                f"**OCR 语言**：{langs_label}", "",
