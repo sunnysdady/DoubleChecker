@@ -31,6 +31,15 @@ def _run(cmd, **kw):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw)
 
 
+# OCR 可调参数（环境变量）：
+#   OCR_DPI     渲染分辨率，默认 300；降到 200 明显更快，精度略降（数值/型号建议保持 300）
+#   OCR_WORKERS 逐页并行数，默认 = CPU 核数（上限 6，避免多语种模型并发吃满内存）
+OCR_DPI = os.environ.get("OCR_DPI", "300")
+OCR_WORKERS = int(os.environ.get("OCR_WORKERS", "0") or 0)
+# 关闭 tesseract 内部 OpenMP 多线程：我们已按页并行，内部再开线程只会互相争抢拖慢
+_TESS_ENV = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+
+
 def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
     """逐页并行 OCR：渲染 → tesseract 单页可搜索 PDF → 合并；带实时「第 X/N 页」进度。"""
     d = out_pdf.parent
@@ -39,18 +48,21 @@ def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
     pages = int(m.group(1)) if m else 1
     pdir = d / "pg"
     pdir.mkdir(exist_ok=True)
-    _set(job_id, message=f"OCR：共 {pages} 页，多语种处理中…")
+    nlang = len([x for x in langs.split("+") if x])
+    _set(job_id, message=f"OCR：共 {pages} 页 × {nlang} 语种，{OCR_DPI}dpi 处理中…")
     done = [0]
     lk = threading.Lock()
+    lo_dpi = str(min(int(OCR_DPI), 150))
 
     def one(i: int) -> None:
         pre = pdir / f"p{i:04d}"
-        _run(["pdftoppm", "-r", "300", "-png", "-singlefile",
+        _run(["pdftoppm", "-r", OCR_DPI, "-png", "-singlefile",
               "-f", str(i), "-l", str(i), str(in_path), str(pre)])
         try:
-            _run(["timeout", "300", "tesseract", f"{pre}.png", str(pre), "-l", langs, "pdf"])
+            _run(["timeout", "300", "tesseract", f"{pre}.png", str(pre), "-l", langs, "pdf"],
+                 env=_TESS_ENV)
         except subprocess.CalledProcessError:
-            _run(["pdftoppm", "-r", "150", "-pdf", "-f", str(i), "-l", str(i), str(in_path), str(pre)])
+            _run(["pdftoppm", "-r", lo_dpi, "-pdf", "-f", str(i), "-l", str(i), str(in_path), str(pre)])
         try:
             Path(f"{pre}.png").unlink()
         except OSError:
@@ -59,7 +71,7 @@ def _ocr_pages(job_id: str, in_path: Path, out_pdf: Path, langs: str) -> int:
             done[0] += 1
             _set(job_id, message=f"OCR 第 {done[0]}/{pages} 页…")
 
-    workers = max(1, min(4, os.cpu_count() or 2))
+    workers = OCR_WORKERS or max(1, min(6, os.cpu_count() or 2))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         for _ in ex.map(one, range(1, pages + 1)):
             pass
@@ -121,12 +133,25 @@ def process(job_id: str, in_path: Path, langs: str, ext: str) -> None:
         _set(job_id, stage="checks", message="运行自动校对检查…")
         result = checks.run_all(md_text)
 
+        # AI 层（L2 跨语言对齐 → L3 联网事实核查 → L5 审计员把关）。
+        # 需配置 AI_API_KEY，否则整层跳过；逐层失败降级，不影响既有结果。
+        try:
+            import ai_checks
+            if ai_checks.enabled():
+                result = ai_checks.run_pipeline(
+                    md_text, result,
+                    progress=lambda m: _set(job_id, stage="checks", message=m))
+        except Exception:
+            pass
+
         # 生成报告 md
         rep = [f"# 校对自动检查报告\n", f"**文件**：{JOBS[job_id]['filename']}",
                f"**OCR 语言**：{langs_label}", "",
                f"统计：高优先 {result['stats']['high']} · 疑似串版 {result['stats']['warn']} · 低优先 {result['stats']['low']}",
                "", "> 本报告为「线索层」：自动机械检查，不替代视觉终审。",
                "> 串版为高召回候选，需人工确认；OCR 疑似错字/截断不纠错、不补全。", ""]
+        if result.get("audit_summary"):
+            rep += ["## AI 审计结论", "> " + result["audit_summary"], ""]
         cur = None
         for it in result["issues"]:
             sev = {"high": "## 高优先", "warn": "## 疑似串版（需人工确认）", "low": "## 低优先"}[it["severity"]]

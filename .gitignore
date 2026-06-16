@@ -20,6 +20,11 @@ proofread_out/
 *.pem
 *.key
 .env
+ai.env
+server/ai.env
 
 # 不入库样例/客户 PDF
 *.pdf
+
+# 本地交付物/方案稿（仅本地，不入库）
+/doc/

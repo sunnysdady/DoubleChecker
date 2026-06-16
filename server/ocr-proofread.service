@@ -12,6 +12,8 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/server
 ExecStart=/bin/bash /home/ubuntu/server/run.sh
 Environment=PORT=8000
+# AI 层密钥（可选）：把 key 写进同目录 ai.env，本行自动读取；文件不存在也不报错（前缀 -）
+EnvironmentFile=-/home/ubuntu/server/ai.env
 Restart=on-failure
 RestartSec=3
 

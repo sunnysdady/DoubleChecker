@@ -106,6 +106,12 @@ def build(meta, result, out_path):
         _set(t.rows[1].cells[i], str(v), align=WD_ALIGN_PARAGRAPH.CENTER)
     _widths(t, [Inches(1.6), Inches(1.6), Inches(2.0), Inches(1.7)])
 
+    if result.get("audit_summary"):
+        _h2(doc, "AI 审计结论（独立审计员对全面性与准确性的把关）")
+        ap = doc.add_paragraph()
+        ar = ap.add_run(result["audit_summary"])
+        ar.font.name = FONT; ar.font.size = Pt(10); ar.font.italic = True
+
     high = [i for i in result["issues"] if i["severity"] == "high"]
     warn = [i for i in result["issues"] if i["severity"] == "warn"]
     low = [i for i in result["issues"] if i["severity"] == "low"]
